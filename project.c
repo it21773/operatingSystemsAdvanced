@@ -17,15 +17,9 @@ void unlockFile(int fileDescriptor);
 void exitGracefully(char *exit_message, int exnum);
 
 int main(int argc, char *argv[]) {
-    //for testing & debugging purposes
-    // argc = 2;
-    // argv[0] = "project.c";
-    // argv[1] = "asd.txt";
-    // argv[2] = "100";
 
     long num; //for input checking
     char *text; //for input checking
-
     if (argc != 3) {
         exitGracefully("Must input exactly 2 arguments, name of txt file and number of children.\n",1);
     }
@@ -45,21 +39,17 @@ int main(int argc, char *argv[]) {
 
     pid_t init = 1;
     pid_t cpid[children];
-    int stringSize = 18;
+    for (int i=0;i<children;i++){
+        cpid[i]=-42;
+    }
 
-    // // struct PipeInfo {
-    // //     int pid;
-    // //     int pipefds[2];
-    // // };
-
-    // // struct PipeInfo* pw_pipefds[children];
-    // // struct PipeInfo* cw_pipefds[children];
-    // int pw_pipefds[children][2];
-    // int cw_pipefds[children][2];
-    // int pw_pipesuccess[children];
-    // int cw_pipesuccess[children];
-    // char parentmessage[children][50];
-    // char childmessage[children][5];
+    int pw_pipefds[children][2];
+    int cw_pipefds[children][2];
+    int pw_pipesuccess[children];
+    int cw_pipesuccess[children];
+    char parentmessage[children][100];
+    char childmessage[5] = "done";
+    char readmessage[100];
     
     int count = 0;
 
@@ -69,18 +59,21 @@ int main(int argc, char *argv[]) {
         exitGracefully("open error\n",1);
     }
 
-    // for (int i=0; i < children ; i++){
-    //     pw_pipesuccess[i] = pipe(pw_pipefds[i]);
-    //     // if (pipesuccess[i] == -1){
-    //     //     exitGracefully("Error with pipes",1);
-    //     // }
-    //     cw_pipesuccess[i] = pipe(cw_pipefds[i]);
-    // }
+    for (int i=0; i < children ; i++){
+        pw_pipesuccess[i] = pipe(pw_pipefds[i]);
+        // if (pipesuccess[i] == -1){
+        //     exitGracefully("Error with pipes",1);
+        // }
+        cw_pipesuccess[i] = pipe(cw_pipefds[i]);
+        // if (pipesuccess[i] == -1){
+        //     exitGracefully("Error with pipes",1);
+        // }
+    }
 
     //writing as a Parent in the beginning of the file
-    char parentWrite[stringSize];
+    char parentWrite[50];
     sprintf(parentWrite, "[PARENT] -> %d\n", getpid());
-    write(fd, parentWrite, stringSize);
+    write(fd, parentWrite, strlen(parentWrite));
 
     while (init != 0 && count<children) {
         init = fork();
@@ -89,22 +82,29 @@ int main(int argc, char *argv[]) {
             perror("fork");
             exitGracefully("fork error\n",1);
         } else if (cpid[count] > 0) { //Parent
-            // for (int i=0; i < children ; i++){
-            //     close(pw_pipefds[i][0]); // So you can only write on this pipe as a parent
-            //     close(cw_pipefds[i][1]); // So you can only read on this pipe as a parent
-            //     write(pw_pipefds[i][1], parentmessage, sizeof(parentmessage)); //Naming the child
-            //     read(cw_pipefds[i][0], childmessage, sizeof(childmessage)); //Child's "done"
-            //     //PROBLEM, cant know with pipe is with which child, need an identifier, the pid is 
-            //     //a good first idea but i only know it after the fork
-            // }
+            close(pw_pipefds[count][0]); // So you can only write on this pipe as a parent (close read side)
+            close(cw_pipefds[count][1]); // So you can only read on this pipe as a parent (close write side)
+
+            sprintf(parentmessage[count], "Hello child, I am your father and I call you: name%d",count); //writing the message(naming)
+            write(pw_pipefds[count][1], parentmessage[count], sizeof(parentmessage[count])); //Name of the child
+            read(cw_pipefds[count][0], readmessage, sizeof(readmessage)); //Child's "done"
+
             waitpid(cpid[count], NULL, 0);
         } else { //Child
+            close(pw_pipefds[count][1]); // So you can only read on this pipe as a child (close write side)
+            close(cw_pipefds[count][0]); // So you can only write on this pipe as a child (close read side)
 
+            read(pw_pipefds[count][0], readmessage, sizeof(readmessage)); //Message of name bestowed unto the child
+            char* name = readmessage+sizeof("Hello child, I am your father and I call you: ")-1; //extracting the name
+            
+            //writing on file
             lockFile(fd);
-            char childWrite[stringSize];
-            sprintf(childWrite, "\n[CHILD] -> %d\n", getpid());
-            write(fd, childWrite, stringSize);
+            char childWrite[100];
+            sprintf(childWrite, "\n%d -> %s\n",getpid(), name);
+            write(fd, childWrite, strlen(childWrite));
             unlockFile(fd);
+            //end of write on file
+            write(cw_pipefds[count][1], childmessage, sizeof(childmessage)); //Child's writing "done"
         }
         count++;
     }
@@ -151,7 +151,6 @@ bool endswith(char *string, char *end){
     }
     return true;
 }
-
 
 void exitGracefully(char *exit_message, int exnum){
     printf("%s", exit_message);

@@ -61,13 +61,13 @@ int main(int argc, char *argv[]) {
 
     for (int i=0; i < children ; i++){
         pw_pipesuccess[i] = pipe(pw_pipefds[i]);
-        // if (pipesuccess[i] == -1){
-        //     exitGracefully("Error with pipes",1);
-        // }
+        if (pw_pipesuccess[i] == -1){
+            exitGracefully("Error with pipes",1);
+        }
         cw_pipesuccess[i] = pipe(cw_pipefds[i]);
-        // if (pipesuccess[i] == -1){
-        //     exitGracefully("Error with pipes",1);
-        // }
+        if (cw_pipesuccess[i] == -1){
+            exitGracefully("Error with pipes",1);
+        }
     }
 
     //writing as a Parent in the beginning of the file

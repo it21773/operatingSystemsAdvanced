@@ -39,6 +39,7 @@ int main(int argc, char *argv[]) {
 
     pid_t init = 1;
     pid_t cpid[children];
+    pid_t term;
     for (int i=0;i<children;i++){
         cpid[i]=-42;
     }
@@ -89,7 +90,7 @@ int main(int argc, char *argv[]) {
             write(pw_pipefds[count][1], parentmessage[count], sizeof(parentmessage[count])); //Name of the child
             read(cw_pipefds[count][0], readmessage, sizeof(readmessage)); //Child's "done"
 
-            waitpid(cpid[count], NULL, 0);
+            // waitpid(cpid[count], NULL, 0);
         } else { //Child
             close(pw_pipefds[count][1]); // So you can only read on this pipe as a child (close write side)
             close(cw_pipefds[count][0]); // So you can only write on this pipe as a child (close read side)
@@ -105,9 +106,12 @@ int main(int argc, char *argv[]) {
             unlockFile(fd);
             //end of write on file
             write(cw_pipefds[count][1], childmessage, sizeof(childmessage)); //Child's writing "done"
+            exitGracefully("",0);
         }
         count++;
     }
+
+    while ((term = wait(NULL)) > 0); //waiting for all children to finish, still younger children write last, shouldn't it be mixed(random)?
 }
 
 void lockFile(int fileDescriptor) {

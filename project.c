@@ -88,7 +88,7 @@ int main(int argc, char *argv[]) {
 
             sprintf(parentmessage[count], "Hello child, I am your father and I call you: name%d",count); //writing the message(naming)
             write(pw_pipefds[count][1], parentmessage[count], sizeof(parentmessage[count])); //Name of the child
-            read(cw_pipefds[count][0], readmessage, sizeof(readmessage)); //Child's "done"
+            // read(cw_pipefds[count][0], readmessage, sizeof(readmessage)); //Child's "done"
 
             // waitpid(cpid[count], NULL, 0);
         } else { //Child
@@ -111,8 +111,16 @@ int main(int argc, char *argv[]) {
         count++;
     }
 
-    while ((term = wait(NULL)) > 0); //waiting for all children to finish, still younger children write last, shouldn't it be mixed(random)?
+    //Every child should have already closed at this stage in the code
+
+    for(int i=0; i<children; i++){
+        read(cw_pipefds[count][0], readmessage, sizeof(readmessage)); //Child's "done"
+    }
+
+    while ((term = wait(NULL)) > 0); //waiting for all children to finish
 }
+
+
 
 void lockFile(int fileDescriptor) {
     struct flock fl;

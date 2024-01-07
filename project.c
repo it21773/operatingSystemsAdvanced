@@ -10,10 +10,11 @@
 #include <signal.h>
 #include <string.h>
 #include <stdbool.h>
+#include <sys/time.h>
 
 // notes/ to-do:
-// CONTINUE FROM testingGround!! (this is fuctioning but outdated)
-// make it so the second message works, use the help.c
+// is_pipe_ready is a prototype.. i think first i need to support N messages from both parent and children
+// improve the pipe messages (name, can you work, yes i can, then go to work) AND incorporate select.c
 // continue further down the exercise(page 8, incorporate select() or pselect() instead of write/read)
 // even with malloc i can't seem to create 1000 children
 // 
@@ -27,6 +28,7 @@
 #define TO_READ 0
 #define TO_WRITE 1
 
+bool is_pipe_ready(int* read_pipe, int timelimit);
 int* create_1d_int_array(int index);
 int** create_2d_INT_array(int index, int jndex);
 char** create_2d_CHAR_array(int index, int jndex);
@@ -74,9 +76,7 @@ int main(int argc, char *argv[]) {
 
     int* pw_pipesuccess = create_1d_int_array(children); //check for successful creation then release
     int* cw_pipesuccess = create_1d_int_array(children); //check for successful creation then release
-    char** parentmessage = create_2d_CHAR_array(children, 100);
 
-    char childmessage[5] = "done";
     char readmessage[100];
 
     int fd = open(argv[1], O_CREAT | O_TRUNC | O_WRONLY, 00600);
@@ -120,6 +120,7 @@ int main(int argc, char *argv[]) {
             read(child_info[i].pipe[PARENT_W][TO_READ], readmessage, sizeof(readmessage)); //Message of name bestowed unto the child
             
             char* name = readmessage+sizeof("Hello child, I am your father and I call you: ")-1; //extracting the name
+            printf("Child %d reading message from parent(extracted): %s\n", i, name);
             
             //writing on file
             lockFile(fd);
@@ -128,7 +129,14 @@ int main(int argc, char *argv[]) {
             write(fd, childWrite, strlen(childWrite));
             unlockFile(fd);
             //end of write on file
+
+            char childmessage[5] = "done";
+            printf("Child %d writing message to parent.\n", i);
             write(child_info[i].pipe[CHILD_W][TO_WRITE], childmessage, sizeof(childmessage)); //Child's writing "done"
+
+            //reading second message
+            read(child_info[i].pipe[PARENT_W][TO_READ], readmessage, sizeof(readmessage));
+            printf("Child %d reading 2nd message from parent: %s\n", i, readmessage);
 
             //closing the pipes completely from child
             close(child_info[i].pipe[PARENT_W][TO_READ]);
@@ -139,11 +147,15 @@ int main(int argc, char *argv[]) {
 
     //Only parent is operating the code below this point
 
+
+    char** parentmessage = create_2d_CHAR_array(children, 100);
+    //Sending first message
     for(int i=0; i<children; i++){
         close(child_info[i].pipe[PARENT_W][TO_READ]); // So you can only write on this pipe as a parent (close read side)
         close(child_info[i].pipe[CHILD_W][TO_WRITE]); // So you can only read on this pipe as a parent (close write side)
 
         //these should be done randomly i think the professor said?
+        printf("Parent sending message to child %d\n", i);
         sprintf(parentmessage[i], "Hello child, I am your father and I call you: name%d",i); //writing the message(naming)
         write(child_info[i].pipe[PARENT_W][TO_WRITE], parentmessage[i], strlen(parentmessage[i])+1); //Name of the child, +1 to include null terminator \0 although is works fine without it
         
@@ -152,6 +164,12 @@ int main(int argc, char *argv[]) {
 
     for(int i=0; i<children; i++){
         read(child_info[i].pipe[CHILD_W][TO_READ], readmessage, sizeof(readmessage)); //Child's "done"
+        printf("Parent reading message from child %d: %s\n", i, readmessage);
+
+        sprintf(parentmessage[i], "Good job!"); //writing the second message
+        printf("Parent sending second message to child %d : %s\n", i, parentmessage[i]);
+        write(child_info[i].pipe[PARENT_W][TO_WRITE], parentmessage[i], strlen(parentmessage[i])+1); //Name of the child, +1 to include null terminator \0 although is works fine without it
+        
     }
 
     
@@ -175,6 +193,50 @@ int main(int argc, char *argv[]) {
 
 }
 
+
+bool is_pipe_ready(int* read_pipe, int timelimit){
+
+    fd_set read_fds;
+    FD_ZERO(&read_fds);
+    FD_SET(read_pipe[TO_READ], &read_fds);  // Monitor the read end of the pipe
+
+    // Set timeout
+    struct timeval timeout;
+    timeout.tv_sec = timelimit;
+    timeout.tv_usec = 0;
+
+    int ready_fds = select(read_pipe[TO_READ] + 1, &read_fds, NULL, NULL, &timeout);
+
+    if (ready_fds == -1) {
+        perror("select");
+        exit(EXIT_FAILURE);
+    }
+
+    // Check if the pipe's read end is ready for reading
+    if (FD_ISSET(read_pipe[TO_READ], &read_fds)) {
+
+        return true;
+
+        //we are simply checking here, no need to actually read the pipe
+    //     char buffer[256];
+    //     ssize_t bytes_read = read(read_pipe[TO_READ], buffer, sizeof(buffer) - 1);
+
+    //     if (bytes_read == -1) {
+    //         perror("read");
+    //         exit(EXIT_FAILURE);
+    //     }
+
+    //     if (bytes_read == 0) {
+    //         printf("Child process received no message from the parent.\n");
+    //     } else {
+    //         buffer[bytes_read] = '\0';
+    //         printf("Child process received the message: %s\n", buffer);
+    //     }
+    } else {
+        // printf("Child process did not receive any message within the timeout.\n");
+        return false;
+    }
+}
 
 int* create_1d_int_array(int index) {
 

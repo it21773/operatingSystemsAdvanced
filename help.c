@@ -34,7 +34,8 @@ int main() {
         printf("Child received: %s\n", parent_message);
 
         // Reply to the parent
-        snprintf(child_reply, sizeof(child_reply), "Hello from child!");
+        // snprintf(child_reply, sizeof(child_reply), "Hello from child!");
+        sprintf(child_reply, "Hello from child!");
         write(child_to_parent_pipe[1], child_reply, sizeof(child_reply));
 
         // Read the parent's second message
@@ -54,7 +55,8 @@ int main() {
         char child_reply[MESSAGE_SIZE];
 
         // Send message to the child
-        snprintf(parent_message, sizeof(parent_message), "Hello from parent!");
+        // snprintf(parent_message, sizeof(parent_message), "Hello from parent!");
+        sprintf(parent_message, "Hello from parent!");
         write(parent_to_child_pipe[1], parent_message, sizeof(parent_message));
 
         // Read the child's reply
@@ -62,7 +64,8 @@ int main() {
         printf("Parent received: %s\n", child_reply);
 
         // Reply to the child again
-        snprintf(parent_message, sizeof(parent_message), "Another message from parent!");
+        // snprintf(parent_message, sizeof(parent_message), "Another message from parent!");
+        sprintf(parent_message, "Another message from parent!");
         write(parent_to_child_pipe[1], parent_message, sizeof(parent_message));
 
         close(parent_to_child_pipe[1]);  // Close the write end of parent-to-child pipe

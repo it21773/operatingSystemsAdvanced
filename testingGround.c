@@ -12,7 +12,7 @@
 #include <stdbool.h>
 
 // notes/ to-do:
-// make it so the second message works, use the help.c
+// improve the pipe messages (name, can you work, yes i can, then go to work) AND incorporate select.c
 // continue further down the exercise(page 8, incorporate select() or pselect() instead of write/read)
 // even with malloc i can't seem to create 1000 children
 // 
@@ -73,9 +73,7 @@ int main(int argc, char *argv[]) {
 
     int* pw_pipesuccess = create_1d_int_array(children); //check for successful creation then release
     int* cw_pipesuccess = create_1d_int_array(children); //check for successful creation then release
-    char** parentmessage = create_2d_CHAR_array(children, 100);
 
-    char childmessage[5] = "done";
     char readmessage[100];
 
     int fd = open(argv[1], O_CREAT | O_TRUNC | O_WRONLY, 00600);
@@ -129,12 +127,13 @@ int main(int argc, char *argv[]) {
             unlockFile(fd);
             //end of write on file
 
+            char childmessage[5] = "done";
             printf("Child %d writing message to parent.\n", i);
             write(child_info[i].pipe[CHILD_W][TO_WRITE], childmessage, sizeof(childmessage)); //Child's writing "done"
 
             //reading second message
             read(child_info[i].pipe[PARENT_W][TO_READ], readmessage, sizeof(readmessage));
-            printf("Child %d reading second message from parent: %s\n", i, name);
+            printf("Child %d reading 2nd message from parent: %s\n", i, readmessage);
 
             //closing the pipes completely from child
             close(child_info[i].pipe[PARENT_W][TO_READ]);
@@ -146,6 +145,8 @@ int main(int argc, char *argv[]) {
     //Only parent is operating the code below this point
 
 
+    char** parentmessage = create_2d_CHAR_array(children, 100);
+    //Sending first message
     for(int i=0; i<children; i++){
         close(child_info[i].pipe[PARENT_W][TO_READ]); // So you can only write on this pipe as a parent (close read side)
         close(child_info[i].pipe[CHILD_W][TO_WRITE]); // So you can only read on this pipe as a parent (close write side)

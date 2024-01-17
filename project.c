@@ -13,9 +13,9 @@
 #include <sys/time.h>
 
 // notes/ to-do:
-// is_pipe_ready is a prototype.. i think first i need to support N messages from both parent and children
-// improve the pipe messages (name, can you work, yes i can, then go to work) AND incorporate select.c
-// continue further down the exercise(page 8, incorporate select() or pselect() instead of write/read)
+// supported N messages(kinda), if i initiate with "./a.out asd.txt 4" it exits for no reason after
+// parent tries to write on pipe(after a few writes already), can/should i clean the pipe somehow?
+// 
 // even with malloc i can't seem to create 1000 children
 // 
 // extra:
@@ -28,7 +28,9 @@
 #define TO_READ 0
 #define TO_WRITE 1
 
-bool is_pipe_ready(int* read_pipe, int timelimit);
+#define N 3
+
+bool is_read_pipe_ready(int* read_pipe, int timelimit);
 int* create_1d_int_array(int index);
 int** create_2d_INT_array(int index, int jndex);
 char** create_2d_CHAR_array(int index, int jndex);
@@ -38,6 +40,8 @@ void lockFile(int fileDescriptor);
 void unlockFile(int fileDescriptor);
 bool endswith(char *string, char *end);
 void exitGracefully(char *exit_message, int exnum);
+bool stdout_to_file(FILE *new_stdout);
+void restore_stdout(FILE *new_stdout);
 
 int main(int argc, char *argv[]) {
 
@@ -57,6 +61,14 @@ int main(int argc, char *argv[]) {
             exitGracefully("Second input must be a positive number.\n",1);
         }
     }
+
+
+    // Save the current stdout, for debugging purposes
+    FILE *original_stdout = stdout;
+    // Open a file for writing (replace "output.txt" with your desired file name), for debugging purposes
+    FILE *new_stdout = fopen("stdout.txt", "w");
+    // stdout_to_file(new_stdout); //to print results on file instead of terminal for better debugging
+
 
     int children = atoi(argv[2]); //to make sure we get the right number
 
@@ -120,7 +132,7 @@ int main(int argc, char *argv[]) {
             read(child_info[i].pipe[PARENT_W][TO_READ], readmessage, sizeof(readmessage)); //Message of name bestowed unto the child
             
             char* name = readmessage+sizeof("Hello child, I am your father and I call you: ")-1; //extracting the name
-            printf("Child %d reading message from parent(extracted): %s\n", i, name);
+            // printf("Child %d reading message from parent(extracted): %s\n", i, name);
             
             //writing on file
             lockFile(fd);
@@ -131,16 +143,36 @@ int main(int argc, char *argv[]) {
             //end of write on file
 
             char childmessage[5] = "done";
-            printf("Child %d writing message to parent.\n", i);
+            // printf("Child %d writing message to parent.\n", i);
             write(child_info[i].pipe[CHILD_W][TO_WRITE], childmessage, sizeof(childmessage)); //Child's writing "done"
 
             //reading second message
             read(child_info[i].pipe[PARENT_W][TO_READ], readmessage, sizeof(readmessage));
-            printf("Child %d reading 2nd message from parent: %s\n", i, readmessage);
+            // printf("Child %d reading 2nd message from parent: %s\n", i, readmessage);
+
+            //reading N(=infinite after testing) messages and sleeping appropriately
+            for(int j=0;j<N;j++) {
+                printf("Child %d STATS: j: %d, i: %d\n", i, j, i);
+                printf("Child %d writing message to parent.\n", i);
+                write(child_info[i].pipe[CHILD_W][TO_WRITE], childmessage, sizeof(childmessage)); //Child's writing "done"
+
+                printf("Child %d attempting to read #%d message from parent.\n", i, j);
+                read(child_info[i].pipe[PARENT_W][TO_READ], readmessage, sizeof(readmessage)); //reads sleep orders
+
+                printf("Child %d read #%d message from parent: %s\n", i, j, readmessage);
+                
+                int to_sleep = (atoi(readmessage) + i) % 5;
+                printf("Child %d sleeping for: %d\n", i, to_sleep);
+                sleep(to_sleep);
+            }
+
 
             //closing the pipes completely from child
             close(child_info[i].pipe[PARENT_W][TO_READ]);
             close(child_info[i].pipe[CHILD_W][TO_WRITE]);
+
+            // Close the file stream
+            fclose(new_stdout);
             exitGracefully("",0);
         }
     }
@@ -155,7 +187,7 @@ int main(int argc, char *argv[]) {
         close(child_info[i].pipe[CHILD_W][TO_WRITE]); // So you can only read on this pipe as a parent (close write side)
 
         //these should be done randomly i think the professor said?
-        printf("Parent sending message to child %d\n", i);
+        // printf("Parent sending message to child %d\n", i);
         sprintf(parentmessage[i], "Hello child, I am your father and I call you: name%d",i); //writing the message(naming)
         write(child_info[i].pipe[PARENT_W][TO_WRITE], parentmessage[i], strlen(parentmessage[i])+1); //Name of the child, +1 to include null terminator \0 although is works fine without it
         
@@ -164,15 +196,39 @@ int main(int argc, char *argv[]) {
 
     for(int i=0; i<children; i++){
         read(child_info[i].pipe[CHILD_W][TO_READ], readmessage, sizeof(readmessage)); //Child's "done"
-        printf("Parent reading message from child %d: %s\n", i, readmessage);
+        // printf("Parent reading message from child %d: %s\n", i, readmessage);
 
         sprintf(parentmessage[i], "Good job!"); //writing the second message
-        printf("Parent sending second message to child %d : %s\n", i, parentmessage[i]);
+        // printf("Parent sending second message to child %d : %s\n", i, parentmessage[i]);
         write(child_info[i].pipe[PARENT_W][TO_WRITE], parentmessage[i], strlen(parentmessage[i])+1); //Name of the child, +1 to include null terminator \0 although is works fine without it
         
     }
 
-    
+    int count = 2*N*children;
+    printf("The parent cicle should be repeated for %d\n", count);
+    count = 0;
+    //Start of N messages
+    for(int j=0;j<2*N;j++) { //after testing this will infinite loop
+        for(int i=0; i<children; i++){
+            printf("C%d Parent j: %d, i: %d\n", count++, j, i);
+            bool check = is_read_pipe_ready(child_info[i].pipe[CHILD_W], 3);
+            if (check) { //if child has responded with done
+                read(child_info[i].pipe[CHILD_W][TO_READ], readmessage, sizeof(readmessage)); //Child's "done"
+                printf("Parent %d reading #%d message from child: %s\n", i, j, readmessage);
+
+                sprintf(parentmessage[i], "3"); //writing for how many seconds to sleep
+                printf("Parent %d sending #%d message(to sleep) to child : %s\n", i, j, parentmessage[i]);
+                write(child_info[i].pipe[PARENT_W][TO_WRITE], parentmessage[i], strlen(parentmessage[i])+1); //Name of the child, +1 to include null terminator \0 although is works fine without it
+                printf("Parent %d send #%d message succesfully : %s\n", i, j, parentmessage[i]);
+            } else {
+                printf("Parent %d SKIPPED child\n", i);
+            }
+
+        }
+    }
+
+    printf("Parent no longer waits for messages!!\n");
+
     // waitpid(cpid[i], NULL, 0);
     while ((wait(NULL)) > 0); //waiting for all children to finish
 
@@ -189,12 +245,15 @@ int main(int argc, char *argv[]) {
     free(child_info);
     free_2d_CHAR_array(parentmessage, children);
 
+
+    // Close the file stream
+    fclose(new_stdout);
     printf("end of program\n");
 
 }
 
 
-bool is_pipe_ready(int* read_pipe, int timelimit){
+bool is_read_pipe_ready(int* read_pipe, int timelimit){
 
     fd_set read_fds;
     FD_ZERO(&read_fds);
@@ -341,4 +400,25 @@ bool endswith(char *string, char *end){
 void exitGracefully(char *exit_message, int exnum){
     printf("%s", exit_message);
     exit(exnum);
+}
+
+bool stdout_to_file(FILE *new_stdout){
+
+    // Check if the file opening was successful
+    if (new_stdout == NULL) {
+        fprintf(stderr, "Failed to open the file for writing.\n");
+        return false; // Return an error code
+    }
+
+    // Redirect stdout to the new file stream
+    if (dup2(fileno(new_stdout), fileno(stdout)) == -1) {
+        fprintf(stderr, "Failed to redirect stdout.\n");
+        return false; // Return an error code
+    }
+
+}
+
+void restore_stdout(FILE *new_stdout) {
+    fflush(stdout);
+    freopen("/dev/tty", "w", stdout); // On Linux, use "/dev/tty" to reopen the console
 }

@@ -6,6 +6,10 @@
 #include <unistd.h>
 #include <sys/wait.h>
 
+// CAN I MAKE THIS SO I KNOW WHICH CHILD IS READY? I NEED TO REVERSE THIS
+// SO THAT THE PARENT SELECT TO READ FROM THE CHILDREN MESSAGES AND
+// TRY TO THEN DETECT WHICH CHILD SEND THE MESSAGE
+
 // key notes to remember!
 // FD_ZERO(fd_set *set): Clears all file descriptors from the set.
 // FD_SET(int fd, fd_set *set): Adds the specified file descriptor to the set.
@@ -15,127 +19,133 @@
 
 int main() {
     // Create a pipe
-    int pipe_fd[2];
-    if (pipe(pipe_fd) == -1) {
-        perror("pipe");
-        exit(EXIT_FAILURE);
+    int pipe_fd[2][2];
+    for (int j = 0; j<2;j++) {
+        if (pipe(pipe_fd[j]) == -1) {
+            perror("pipe");
+            exit(EXIT_FAILURE);
+        }
     }
 
     // Fork to create a child process
-    pid_t pid = fork();
 
-    if (pid == -1) {
-        perror("fork");
-        exit(EXIT_FAILURE);
-    }
+    for (int i = 0; i<2;i++) {
+        pid_t pid = fork();
 
-    if (pid > 0) {  // Parent process
-        // Close the read end of the pipe (not used by the parent)
-        close(pipe_fd[0]);
-
-
-        sleep(6); //this will trigger the timeout. pipe needs to remain open
-
-        // Send a message through the pipe
-        const char *message = "Hello, child process!";
-        ssize_t bytes_written = write(pipe_fd[1], message, strlen(message));
-
-        if (bytes_written == -1) {
-            perror("write");
+        if (pid == -1) {
+            perror("fork");
             exit(EXIT_FAILURE);
-        }
+        } else if (pid > 0) {  // Parent process
+            // Close the read end of the pipe (not used by the parent)
+            close(pipe_fd[i][0]);
 
-        sleep(6);
-        // Close the write end of the pipe without writing any message
-        close(pipe_fd[1]); //pipe needs to remain open to trigger the timeout
 
-        while ((wait(NULL)) > 0);
-        printf("Parent process did its job.\n");
-    } else {  // Child process
-        // Close the write end of the pipe (not used by the child)
-        close(pipe_fd[1]);
+            sleep(6); //this will trigger the timeout. pipe needs to remain open
 
-        // Set up file descriptor set for select
-        fd_set read_fds;
-        FD_ZERO(&read_fds);
-        FD_SET(pipe_fd[0], &read_fds);  // Monitor the read end of the pipe
+            // Send a message through the pipe
+            const char *message = "Hello, child process!";
+            ssize_t bytes_written = write(pipe_fd[i][1], message, strlen(message));
 
-        printf("Child process waiting for a message from the parent...\n");
-
-        // Set timeout for 5 seconds
-        struct timeval timeout;
-        timeout.tv_sec = 5;
-        timeout.tv_usec = 0;
-
-        // Wait for input on the pipe or timeout
-        int ready_fds = select(pipe_fd[0] + 1, &read_fds, NULL, NULL, &timeout);
-
-        if (ready_fds == -1) {
-            perror("select");
-            exit(EXIT_FAILURE);
-        }
-
-        // Check if the pipe's read end is ready for reading
-        if (FD_ISSET(pipe_fd[0], &read_fds)) {
-            char buffer[256];
-            ssize_t bytes_read = read(pipe_fd[0], buffer, sizeof(buffer) - 1);
-
-            if (bytes_read == -1) {
-                perror("read");
+            if (bytes_written == -1) {
+                perror("write");
                 exit(EXIT_FAILURE);
             }
 
-            if (bytes_read == 0) {
-                printf("Child process received no message from the parent.\n");
-            } else {
-                buffer[bytes_read] = '\0';
-                printf("Child process received the message: %s\n", buffer);
-            }
-        } else {
-            printf("Child process did not receive any message within the timeout.\n");
-        }
+            sleep(6);
+            // Close the write end of the pipe without writing any message
+            close(pipe_fd[i][1]); //pipe needs to remain open to trigger the timeout
 
-        //wait again:
-        FD_ZERO(&read_fds);
-        FD_SET(pipe_fd[0], &read_fds);  // Monitor the read end of the pipe
-        timeout.tv_sec = 5;
-        timeout.tv_usec = 0;
+        } else {  // Child process
+            // Close the write end of the pipe (not used by the child)
+            close(pipe_fd[i][1]);
 
-        ready_fds = select(pipe_fd[0] + 1, &read_fds, NULL, NULL, &timeout);
+            // Set up file descriptor set for select
+            fd_set read_fds;
+            FD_ZERO(&read_fds);
+            FD_SET(pipe_fd[i][0], &read_fds);  // Monitor the read end of the pipe
 
-        if (ready_fds == -1) {
-            perror("select");
-            exit(EXIT_FAILURE);
-        }
+            printf("Child process waiting for a message from the parent...\n");
 
-        // Check if the pipe's read end is ready for reading
-        if (FD_ISSET(pipe_fd[0], &read_fds)) {
-            char buffer[256];
-            ssize_t bytes_read = read(pipe_fd[0], buffer, sizeof(buffer) - 1);
+            // Set timeout for 5 seconds
+            struct timeval timeout;
+            timeout.tv_sec = 5;
+            timeout.tv_usec = 0;
 
-            if (bytes_read == -1) {
-                perror("read");
+            // Wait for input on the pipe or timeout
+            int ready_fds = select(pipe_fd[i][0] + 1, &read_fds, NULL, NULL, &timeout);
+
+            if (ready_fds == -1) {
+                perror("select");
                 exit(EXIT_FAILURE);
             }
 
-            if (bytes_read == 0) {
-                printf("Child process received no message from the parent.\n");
+            // Check if the pipe's read end is ready for reading
+            if (FD_ISSET(pipe_fd[i][0], &read_fds)) {
+                char buffer[256];
+                ssize_t bytes_read = read(pipe_fd[i][0], buffer, sizeof(buffer) - 1);
+
+                if (bytes_read == -1) {
+                    perror("read");
+                    exit(EXIT_FAILURE);
+                }
+
+                if (bytes_read == 0) {
+                    printf("Child process received no message from the parent.\n");
+                } else {
+                    buffer[bytes_read] = '\0';
+                    printf("Child process received the message: %s\n", buffer);
+                }
             } else {
-                buffer[bytes_read] = '\0';
-                printf("Child process received the message: %s\n", buffer);
+                printf("Child process did not receive any message within the timeout.\n");
             }
-        } else {
-            printf("Child process did not receive any message within the timeout.\n");
+
+            printf("Child process waiting for 2nd time.\n");
+
+            //wait again:
+            FD_ZERO(&read_fds);
+            FD_SET(pipe_fd[i][0], &read_fds);  // Monitor the read end of the pipe
+            timeout.tv_sec = 5;
+            timeout.tv_usec = 0;
+
+            ready_fds = select(pipe_fd[i][0] + 1, &read_fds, NULL, NULL, &timeout);
+
+            if (ready_fds == -1) {
+                perror("select");
+                exit(EXIT_FAILURE);
+            }
+
+            // Check if the pipe's read end is ready for reading
+            if (FD_ISSET(pipe_fd[i][0], &read_fds)) {
+                char buffer[256];
+                ssize_t bytes_read = read(pipe_fd[i][0], buffer, sizeof(buffer) - 1);
+
+                if (bytes_read == -1) {
+                    perror("read");
+                    exit(EXIT_FAILURE);
+                }
+
+                if (bytes_read == 0) {
+                    printf("Child process received no message from the parent.\n");
+                } else {
+                    buffer[bytes_read] = '\0';
+                    printf("Child process received the message: %s\n", buffer);
+                }
+            } else {
+                printf("Child process did not receive any message within the timeout.\n");
+            }
+
+            // printf("Child reading pipe anyway\n");
+            // char buffer[256];
+            // read(pipe_fd[i][0], buffer, sizeof(buffer) - 1);
+            // printf("Child process received the message: %s\n", buffer);
+
+            // Close the read end of the pipe after reading
+            close(pipe_fd[i][0]);
+            exit(0);
         }
-
-        printf("Child reading pipe anyway\n");
-        char buffer[256];
-        read(pipe_fd[0], buffer, sizeof(buffer) - 1);
-        printf("Child process received the message: %s\n", buffer);
-
-        // Close the read end of the pipe after reading
-        close(pipe_fd[0]);
     }
 
+    while ((wait(NULL)) > 0);
+    printf("Parent process did its job.\n");
     return 0;
 }

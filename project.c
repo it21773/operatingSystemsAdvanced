@@ -13,8 +13,8 @@
 #include <sys/time.h>
 
 // notes/ to-do:
-// supported N messages(kinda), if i initiate with "./a.out asd.txt 4" it exits for no reason after
-// parent tries to write on pipe(after a few writes already), can/should i clean the pipe somehow?
+// incorporate signals
+// and finally incorporate RPC
 // 
 // even with malloc i can't seem to create 1000 children
 // 
@@ -101,10 +101,12 @@ int main(int argc, char *argv[]) {
     for (int i=0; i < children ; i++){
         pw_pipesuccess[i] = pipe(child_info[i].pipe[PARENT_W]);
         if (pw_pipesuccess[i] == -1){
+            close(fd);
             exitGracefully("Error with pipes",1);
         }
         cw_pipesuccess[i] = pipe(child_info[i].pipe[CHILD_W]);
         if (cw_pipesuccess[i] == -1){
+            close(fd);
             exitGracefully("Error with pipes",1);
         }
     }
@@ -120,6 +122,7 @@ int main(int argc, char *argv[]) {
         init = fork();
         child_info[i].pid = init;
         if (init < 0) {
+            //can the error be handled better?
             perror("fork");
             exitGracefully("fork error\n",1);
         } else if (init > 0) { //Parent
@@ -151,7 +154,9 @@ int main(int argc, char *argv[]) {
             // printf("Child %d reading 2nd message from parent: %s\n", i, readmessage);
 
             //reading N(=infinite after testing) messages and sleeping appropriately
-            for(int j=0;j<N;j++) {
+            // for(int j=0;j<N;j++) {
+            while(true) {
+                int j = -42; //uneccessary
                 printf("Child %d STATS: j: %d, i: %d\n", i, j, i);
                 printf("Child %d writing message to parent.\n", i);
                 write(child_info[i].pipe[CHILD_W][TO_WRITE], childmessage, sizeof(childmessage)); //Child's writing "done"
@@ -166,18 +171,30 @@ int main(int argc, char *argv[]) {
                 sleep(to_sleep);
             }
 
+            // Close the file stream, if used. (This is used for debugging)
+            // fclose(new_stdout);
 
             //closing the pipes completely from child
             close(child_info[i].pipe[PARENT_W][TO_READ]);
             close(child_info[i].pipe[CHILD_W][TO_WRITE]);
+        
+            // this seems uneccessary since its a reference
+            free(child_info[i].pipe[PARENT_W]);
+            free(child_info[i].pipe[CHILD_W]);
+            
+            // is this neccessary?
+            free(child_info);
 
-            // Close the file stream
-            fclose(new_stdout);
+            close(fd);
+
             exitGracefully("",0);
         }
     }
 
     //Only parent is operating the code below this point
+
+    //closing the file now that all children were born and have already shared that
+    close(fd);
 
 
     char** parentmessage = create_2d_CHAR_array(children, 100);
@@ -193,7 +210,6 @@ int main(int argc, char *argv[]) {
         
     }
 
-
     for(int i=0; i<children; i++){
         read(child_info[i].pipe[CHILD_W][TO_READ], readmessage, sizeof(readmessage)); //Child's "done"
         // printf("Parent reading message from child %d: %s\n", i, readmessage);
@@ -208,7 +224,9 @@ int main(int argc, char *argv[]) {
     printf("The parent cicle should be repeated for %d\n", count);
     count = 0;
     //Start of N messages
-    for(int j=0;j<2*N;j++) { //after testing this will infinite loop
+    // for(int j=0;j<2*N;j++) { //after testing this will infinite loop
+    while(true) {
+        int j = -42; //uneccessary
         for(int i=0; i<children; i++){
             printf("C%d Parent j: %d, i: %d\n", count++, j, i);
             bool check = is_read_pipe_ready(child_info[i].pipe[CHILD_W], 3);
@@ -218,6 +236,7 @@ int main(int argc, char *argv[]) {
 
                 sprintf(parentmessage[i], "3"); //writing for how many seconds to sleep
                 printf("Parent %d sending #%d message(to sleep) to child : %s\n", i, j, parentmessage[i]);
+                printf("parent message: %s | strlen(+1) of that: %ld\n", parentmessage[i], strlen(parentmessage[i])+1);
                 write(child_info[i].pipe[PARENT_W][TO_WRITE], parentmessage[i], strlen(parentmessage[i])+1); //Name of the child, +1 to include null terminator \0 although is works fine without it
                 printf("Parent %d send #%d message succesfully : %s\n", i, j, parentmessage[i]);
             } else {
@@ -246,8 +265,9 @@ int main(int argc, char *argv[]) {
     free_2d_CHAR_array(parentmessage, children);
 
 
-    // Close the file stream
-    fclose(new_stdout);
+    // Close the file stream, if used. (This is used for debugging)
+    // fclose(new_stdout);
+
     printf("end of program\n");
 
 }

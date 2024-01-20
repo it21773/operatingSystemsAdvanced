@@ -13,8 +13,9 @@
 #include <sys/time.h>
 
 // notes/ to-do:
-// incorporate signals
-// and finally incorporate RPC
+// remains: improve exitgracefully, incorporate RPC,
+//      implement exec(this will also improve resource clean-up(with singals)),
+//      make code more readable
 // 
 // even with malloc i can't seem to create 1000 children
 // 
@@ -30,12 +31,28 @@
 
 #define N 3
 
+
+typedef struct Child_info {
+    pid_t pid;
+    char* name;
+    int** pipe;
+} Child_info;
+
+int children;
+Child_info* child_info;
+int fd;
+char parentmessage[100];
+
+
+void on_sig_term_parent(int sig);
+void on_sig_term_child(int sig);
+void free_resources_parent();
+void free_resources_child();
 bool is_read_pipe_ready(int* read_pipe, int timelimit);
-int* create_1d_int_array(int index);
 int** create_2d_INT_array(int index, int jndex);
-char** create_2d_CHAR_array(int index, int jndex);
+// char** create_2d_CHAR_array(int index, int jndex);
 void free_2d_INT_array(int** array, int index);
-void free_2d_CHAR_array(char** array, int index);
+// void free_2d_CHAR_array(char** array, int index);
 void lockFile(int fileDescriptor);
 void unlockFile(int fileDescriptor);
 bool endswith(char *string, char *end);
@@ -62,36 +79,27 @@ int main(int argc, char *argv[]) {
         }
     }
 
+    pid_t init = 1;
+    char readmessage[100];
 
     // Save the current stdout, for debugging purposes
-    FILE *original_stdout = stdout;
+    // FILE *original_stdout = stdout;
     // Open a file for writing (replace "output.txt" with your desired file name), for debugging purposes
-    FILE *new_stdout = fopen("stdout.txt", "w");
+    // FILE *new_stdout = fopen("stdout.txt", "w");
     // stdout_to_file(new_stdout); //to print results on file instead of terminal for better debugging
 
 
-    int children = atoi(argv[2]); //to make sure we get the right number
+    children = atoi(argv[2]); //to make sure we get the right number
 
-    typedef struct Child_info {
-        pid_t pid;
-        char* name;
-        int** pipe;
-    } Child_info;
-
-    Child_info* child_info = (Child_info*) malloc(children*sizeof(Child_info));
+    child_info = (Child_info*) malloc(children*sizeof(Child_info));
 
     for(int i=0; i<children; i++){
         child_info[i].pipe = create_2d_INT_array(2,2);
+        // child_info[i].pipe = (int**)malloc(2 * sizeof(int*));
     }
 
-    pid_t init = 1;
 
-    int* pw_pipesuccess = create_1d_int_array(children); //check for successful creation then release
-    int* cw_pipesuccess = create_1d_int_array(children); //check for successful creation then release
-
-    char readmessage[100];
-
-    int fd = open(argv[1], O_CREAT | O_TRUNC | O_WRONLY, 00600);
+    fd = open(argv[1], O_CREAT | O_TRUNC | O_WRONLY, 00600);
     if (fd == -1) { //checking if open succeeded
         perror("open");
         exitGracefully("open error\n",1);
@@ -99,19 +107,21 @@ int main(int argc, char *argv[]) {
 
 
     for (int i=0; i < children ; i++){
-        pw_pipesuccess[i] = pipe(child_info[i].pipe[PARENT_W]);
-        if (pw_pipesuccess[i] == -1){
+        if(pipe(child_info[i].pipe[PARENT_W])) {
             close(fd);
-            exitGracefully("Error with pipes",1);
+            exitGracefully("Error with pipes1",1);
         }
-        cw_pipesuccess[i] = pipe(child_info[i].pipe[CHILD_W]);
-        if (cw_pipesuccess[i] == -1){
+        if(pipe(child_info[i].pipe[CHILD_W])) {
             close(fd);
-            exitGracefully("Error with pipes",1);
+            exitGracefully("Error with pipes2",1);
         }
     }
-    free(pw_pipesuccess);
-    free(cw_pipesuccess);
+
+
+    //this is earlier we can handle the signal right? Otherwise we need more signal handling functions
+    // in which they close fewer things since we havent yet opened everything
+    signal(SIGINT, (void (*)(int))on_sig_term_parent);
+
 
     //writing as a Parent in the beginning of the file
     char parentWrite[50];
@@ -128,61 +138,56 @@ int main(int argc, char *argv[]) {
         } else if (init > 0) { //Parent
             //do nothing, just birth children
         } else { //Child
+            signal(SIGINT, (void (*)(int))on_sig_term_child);
+
+            char* name;
+            int count=0;
+            int to_sleep;
+            char childWrite[100];
+            char childmessage[5] = "done";
 
             close(child_info[i].pipe[PARENT_W][TO_WRITE]); // So you can only read on this pipe as a child (close write side)
             close(child_info[i].pipe[CHILD_W][TO_READ]); // So you can only write on this pipe as a child (close read side)
 
             read(child_info[i].pipe[PARENT_W][TO_READ], readmessage, sizeof(readmessage)); //Message of name bestowed unto the child
             
-            char* name = readmessage+sizeof("Hello child, I am your father and I call you: ")-1; //extracting the name
-            // printf("Child %d reading message from parent(extracted): %s\n", i, name);
-            
+            name = readmessage+sizeof("Hello child, I am your father and I call you: ")-1; //extracting the name
+            printf("I'm child #%d and my name is %s", i, name);
+
             //writing on file
             lockFile(fd);
-            char childWrite[100];
             sprintf(childWrite, "%d -> %s\n",getpid(), name);
             write(fd, childWrite, strlen(childWrite));
             unlockFile(fd);
             //end of write on file
 
-            char childmessage[5] = "done";
-            // printf("Child %d writing message to parent.\n", i);
             write(child_info[i].pipe[CHILD_W][TO_WRITE], childmessage, sizeof(childmessage)); //Child's writing "done"
 
             //reading second message
-            read(child_info[i].pipe[PARENT_W][TO_READ], readmessage, sizeof(readmessage));
-            // printf("Child %d reading 2nd message from parent: %s\n", i, readmessage);
+            read(child_info[i].pipe[PARENT_W][TO_READ], readmessage, sizeof(readmessage)); //Parent's "good job"
 
-            //reading N(=infinite after testing) messages and sleeping appropriately
-            // for(int j=0;j<N;j++) {
+            //reading messages and sleeping appropriately
             while(true) {
-                int j = -42; //uneccessary
-                printf("Child %d STATS: j: %d, i: %d\n", i, j, i);
-                printf("Child %d writing message to parent.\n", i);
                 write(child_info[i].pipe[CHILD_W][TO_WRITE], childmessage, sizeof(childmessage)); //Child's writing "done"
 
-                printf("Child %d attempting to read #%d message from parent.\n", i, j);
+                printf("Child #%d awaiting orders no.%d\n", i, count++);
                 read(child_info[i].pipe[PARENT_W][TO_READ], readmessage, sizeof(readmessage)); //reads sleep orders
-
-                printf("Child %d read #%d message from parent: %s\n", i, j, readmessage);
                 
-                int to_sleep = (atoi(readmessage) + i) % 5;
-                printf("Child %d sleeping for: %d\n", i, to_sleep);
+                to_sleep = (atoi(readmessage) + i) % 5;
+                printf("Child #%d sleeping for: %d\n", i, to_sleep);
                 sleep(to_sleep);
+                printf("Child #%d awoke from slumber\n", i);
             }
-
-            // Close the file stream, if used. (This is used for debugging)
-            // fclose(new_stdout);
 
             //closing the pipes completely from child
             close(child_info[i].pipe[PARENT_W][TO_READ]);
             close(child_info[i].pipe[CHILD_W][TO_WRITE]);
         
-            // this seems uneccessary since its a reference
+            // this is necessary
             free(child_info[i].pipe[PARENT_W]);
             free(child_info[i].pipe[CHILD_W]);
             
-            // is this neccessary?
+            // is this neccessary? prob yes
             free(child_info);
 
             close(fd);
@@ -196,53 +201,43 @@ int main(int argc, char *argv[]) {
     //closing the file now that all children were born and have already shared that
     close(fd);
 
+    //if i use exec these can go up since the children wont know about them anyway
+    int count=0;
 
-    char** parentmessage = create_2d_CHAR_array(children, 100);
     //Sending first message
     for(int i=0; i<children; i++){
         close(child_info[i].pipe[PARENT_W][TO_READ]); // So you can only write on this pipe as a parent (close read side)
         close(child_info[i].pipe[CHILD_W][TO_WRITE]); // So you can only read on this pipe as a parent (close write side)
 
-        //these should be done randomly i think the professor said?
-        // printf("Parent sending message to child %d\n", i);
-        sprintf(parentmessage[i], "Hello child, I am your father and I call you: name%d",i); //writing the message(naming)
-        write(child_info[i].pipe[PARENT_W][TO_WRITE], parentmessage[i], strlen(parentmessage[i])+1); //Name of the child, +1 to include null terminator \0 although is works fine without it
-        
+        printf("Parent naming child %d\n", i);
+        sprintf(parentmessage, "Hello child, I am your father and I call you: name%d",i); //writing the message(naming)
+        write(child_info[i].pipe[PARENT_W][TO_WRITE], parentmessage, strlen(parentmessage)+1); //Name of the child, +1 to include null terminator \0 although is works fine without it
     }
 
     for(int i=0; i<children; i++){
         read(child_info[i].pipe[CHILD_W][TO_READ], readmessage, sizeof(readmessage)); //Child's "done"
         // printf("Parent reading message from child %d: %s\n", i, readmessage);
 
-        sprintf(parentmessage[i], "Good job!"); //writing the second message
+        sprintf(parentmessage, "Good job!"); //writing the second message
         // printf("Parent sending second message to child %d : %s\n", i, parentmessage[i]);
-        write(child_info[i].pipe[PARENT_W][TO_WRITE], parentmessage[i], strlen(parentmessage[i])+1); //Name of the child, +1 to include null terminator \0 although is works fine without it
+        write(child_info[i].pipe[PARENT_W][TO_WRITE], parentmessage, strlen(parentmessage)+1); //Name of the child, +1 to include null terminator \0 although is works fine without it
         
     }
 
-    int count = 2*N*children;
-    printf("The parent cicle should be repeated for %d\n", count);
-    count = 0;
-    //Start of N messages
-    // for(int j=0;j<2*N;j++) { //after testing this will infinite loop
+    //Start of infinite messages
     while(true) {
-        int j = -42; //uneccessary
         for(int i=0; i<children; i++){
-            printf("C%d Parent j: %d, i: %d\n", count++, j, i);
+            printf("Attempting cycle %d for child #%d\n", count++, i);
             bool check = is_read_pipe_ready(child_info[i].pipe[CHILD_W], 3);
             if (check) { //if child has responded with done
                 read(child_info[i].pipe[CHILD_W][TO_READ], readmessage, sizeof(readmessage)); //Child's "done"
-                printf("Parent %d reading #%d message from child: %s\n", i, j, readmessage);
 
-                sprintf(parentmessage[i], "3"); //writing for how many seconds to sleep
-                printf("Parent %d sending #%d message(to sleep) to child : %s\n", i, j, parentmessage[i]);
-                printf("parent message: %s | strlen(+1) of that: %ld\n", parentmessage[i], strlen(parentmessage[i])+1);
-                write(child_info[i].pipe[PARENT_W][TO_WRITE], parentmessage[i], strlen(parentmessage[i])+1); //Name of the child, +1 to include null terminator \0 although is works fine without it
-                printf("Parent %d send #%d message succesfully : %s\n", i, j, parentmessage[i]);
+                sprintf(parentmessage, "3"); //writing for how many seconds to sleep
+                write(child_info[i].pipe[PARENT_W][TO_WRITE], parentmessage, strlen(parentmessage)+1); //Name of the child, +1 to include null terminator \0 although is works fine without it
+                printf("Parent send message to child #%d\n", i);
             } else {
-                printf("Parent %d SKIPPED child\n", i);
+                printf("Parent SKIPPED child #%d\n", i);
             }
-
         }
     }
 
@@ -258,11 +253,9 @@ int main(int argc, char *argv[]) {
         close(child_info[i].pipe[PARENT_W][TO_WRITE]);
         close(child_info[i].pipe[CHILD_W][TO_READ]);
 
-        free(child_info[i].pipe[PARENT_W]);
-        free(child_info[i].pipe[CHILD_W]);
+        free_2d_INT_array(child_info[i].pipe, 2);
     }
     free(child_info);
-    free_2d_CHAR_array(parentmessage, children);
 
 
     // Close the file stream, if used. (This is used for debugging)
@@ -293,35 +286,10 @@ bool is_read_pipe_ready(int* read_pipe, int timelimit){
 
     // Check if the pipe's read end is ready for reading
     if (FD_ISSET(read_pipe[TO_READ], &read_fds)) {
-
         return true;
-
-        //we are simply checking here, no need to actually read the pipe
-    //     char buffer[256];
-    //     ssize_t bytes_read = read(read_pipe[TO_READ], buffer, sizeof(buffer) - 1);
-
-    //     if (bytes_read == -1) {
-    //         perror("read");
-    //         exit(EXIT_FAILURE);
-    //     }
-
-    //     if (bytes_read == 0) {
-    //         printf("Child process received no message from the parent.\n");
-    //     } else {
-    //         buffer[bytes_read] = '\0';
-    //         printf("Child process received the message: %s\n", buffer);
-    //     }
     } else {
-        // printf("Child process did not receive any message within the timeout.\n");
         return false;
     }
-}
-
-int* create_1d_int_array(int index) {
-
-    int* array = (int*)malloc(index * sizeof(int));
-
-    return array;
 }
 
 int** create_2d_INT_array(int index, int jndex) {
@@ -342,23 +310,23 @@ int** create_2d_INT_array(int index, int jndex) {
     return array;
 }
 
-char** create_2d_CHAR_array(int index, int jndex) {
+// char** create_2d_CHAR_array(int index, int jndex) {
 
-    char** array = (char**)malloc(index * sizeof(char*));
-    if (array == NULL) {
-        perror("Memory allocation failed");
-        exitGracefully("Memory allocation failed\n",1);
-    }
-    for (int i = 0; i < index; ++i) {
-        array[i] = (char*)malloc(jndex * sizeof(char));
-        if (array[i] == NULL) {
-            perror("Memory allocation failed");
-            exitGracefully("Memory allocation failed\n",1);
-        }
-    }
+//     char** array = (char**)malloc(index * sizeof(char*));
+//     if (array == NULL) {
+//         perror("Memory allocation failed");
+//         exitGracefully("Memory allocation failed\n",1);
+//     }
+//     for (int i = 0; i < index; ++i) {
+//         array[i] = (char*)malloc(jndex * sizeof(char));
+//         if (array[i] == NULL) {
+//             perror("Memory allocation failed");
+//             exitGracefully("Memory allocation failed\n",1);
+//         }
+//     }
 
-    return array;
-}
+//     return array;
+// }
 
 void free_2d_INT_array(int** array, int index) {
     for (int i = 0; i < index; ++i) {
@@ -367,12 +335,12 @@ void free_2d_INT_array(int** array, int index) {
     free(array);
 }
 
-void free_2d_CHAR_array(char** array, int index) {
-    for (int i = 0; i < index; ++i) {
-        free(array[i]);
-    }
-    free(array);
-}
+// void free_2d_CHAR_array(char** array, int index) {
+//     for (int i = 0; i < index; ++i) {
+//         free(array[i]);
+//     }
+//     free(array);
+// }
 
 
 void lockFile(int fileDescriptor) {
@@ -417,13 +385,56 @@ bool endswith(char *string, char *end){
     return true;
 }
 
+void free_resources_child(){
+    for (int i = 0; i < children; i++) {
+        //closing the pipes completely from child
+        close(child_info[i].pipe[PARENT_W][TO_READ]);
+        close(child_info[i].pipe[CHILD_W][TO_WRITE]);
+
+        free_2d_INT_array(child_info[i].pipe, 2);
+    }
+    free(child_info);
+    if (fd != -1) {
+        close(fd);
+    }
+}
+
+void free_resources_parent(){
+    for (int i=0;i<children;i++){
+        //closing the pipes completely from parent
+        close(child_info[i].pipe[PARENT_W][TO_WRITE]);
+        close(child_info[i].pipe[CHILD_W][TO_READ]);
+
+        free_2d_INT_array(child_info[i].pipe, 2);
+    }
+    free(child_info);
+    if (fd != -1) {
+        close(fd);
+    }
+}
+
+void on_sig_term_parent(int sig) {
+    while ((wait(NULL)) > 0); //waiting for all children to finish their clean up
+    printf("Children cleaned up. Exiting\n");
+    free_resources_parent();
+    exit(0);
+}
+
+void on_sig_term_child(int sig) {
+    printf("Terminating due to SIGINT(Ctrl+C) signal\n");
+    
+    free_resources_child();
+    exit(0);
+}
+
 void exitGracefully(char *exit_message, int exnum){
     printf("%s", exit_message);
     exit(exnum);
 }
 
-bool stdout_to_file(FILE *new_stdout){
 
+//debugging
+bool stdout_to_file(FILE *new_stdout){
     // Check if the file opening was successful
     if (new_stdout == NULL) {
         fprintf(stderr, "Failed to open the file for writing.\n");
@@ -435,7 +446,6 @@ bool stdout_to_file(FILE *new_stdout){
         fprintf(stderr, "Failed to redirect stdout.\n");
         return false; // Return an error code
     }
-
 }
 
 void restore_stdout(FILE *new_stdout) {

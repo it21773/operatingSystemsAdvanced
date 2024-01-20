@@ -13,7 +13,7 @@
 #include <sys/time.h>
 
 // notes/ to-do:
-// remains: improve exitgracefully, incorporate RPC,
+// remains: incorporate RPC,
 //      implement exec(this will also improve resource clean-up(with singals)),
 //      make code more readable
 // 
@@ -50,9 +50,7 @@ void free_resources_parent();
 void free_resources_child();
 bool is_read_pipe_ready(int* read_pipe, int timelimit);
 int** create_2d_INT_array(int index, int jndex);
-// char** create_2d_CHAR_array(int index, int jndex);
 void free_2d_INT_array(int** array, int index);
-// void free_2d_CHAR_array(char** array, int index);
 void lockFile(int fileDescriptor);
 void unlockFile(int fileDescriptor);
 bool endswith(char *string, char *end);
@@ -65,29 +63,22 @@ int main(int argc, char *argv[]) {
     long num; //for input checking
     char *text; //for input checking
     if (argc != 3) {
-        exitGracefully("Must input exactly 2 arguments, name of txt file and number of children.\n",1);
+        exitGracefully("Must input exactly 2 arguments, name of txt file and number of children.\n", EXIT_FAILURE);
     }
     if (!endswith(argv[1],".txt")) {
-        exitGracefully("First input must be a .txt file.\n",1);
+        exitGracefully("First input must be a .txt file.\n", EXIT_FAILURE);
     }
     num = strtol (argv[2], &text, 10);
     if ((text == argv[2]) || (*text != '\0')) {
-        exitGracefully("Second input must be a number.\n",1);
+        exitGracefully("Second input must be a number.\n", EXIT_FAILURE);
     } else {
         if (num < 0) {
-            exitGracefully("Second input must be a positive number.\n",1);
+            exitGracefully("Second input must be a positive number.\n", EXIT_FAILURE);
         }
     }
 
     pid_t init = 1;
     char readmessage[100];
-
-    // Save the current stdout, for debugging purposes
-    // FILE *original_stdout = stdout;
-    // Open a file for writing (replace "output.txt" with your desired file name), for debugging purposes
-    // FILE *new_stdout = fopen("stdout.txt", "w");
-    // stdout_to_file(new_stdout); //to print results on file instead of terminal for better debugging
-
 
     children = atoi(argv[2]); //to make sure we get the right number
 
@@ -95,25 +86,26 @@ int main(int argc, char *argv[]) {
 
     for(int i=0; i<children; i++){
         child_info[i].pipe = create_2d_INT_array(2,2);
-        // child_info[i].pipe = (int**)malloc(2 * sizeof(int*));
     }
 
 
     fd = open(argv[1], O_CREAT | O_TRUNC | O_WRONLY, 00600);
     if (fd == -1) { //checking if open succeeded
         perror("open");
-        exitGracefully("open error\n",1);
+        exitGracefully("Open error\n", EXIT_FAILURE);
     }
 
 
     for (int i=0; i < children ; i++){
         if(pipe(child_info[i].pipe[PARENT_W])) {
             close(fd);
-            exitGracefully("Error with pipes1",1);
+            perror("pipes");
+            exitGracefully("Error with pipes", EXIT_FAILURE);
         }
         if(pipe(child_info[i].pipe[CHILD_W])) {
             close(fd);
-            exitGracefully("Error with pipes2",1);
+            perror("pipes");
+            exitGracefully("Error with pipes", EXIT_FAILURE);
         }
     }
 
@@ -134,7 +126,7 @@ int main(int argc, char *argv[]) {
         if (init < 0) {
             //can the error be handled better?
             perror("fork");
-            exitGracefully("fork error\n",1);
+            exitGracefully("Fork error\n", EXIT_FAILURE);
         } else if (init > 0) { //Parent
             //do nothing, just birth children
         } else { //Child
@@ -173,11 +165,13 @@ int main(int argc, char *argv[]) {
                 printf("Child #%d awaiting orders no.%d\n", i, count++);
                 read(child_info[i].pipe[PARENT_W][TO_READ], readmessage, sizeof(readmessage)); //reads sleep orders
                 
-                to_sleep = (atoi(readmessage) + i) % 5;
+                to_sleep = (atoi(readmessage)) % 5;
                 printf("Child #%d sleeping for: %d\n", i, to_sleep);
                 sleep(to_sleep);
                 printf("Child #%d awoke from slumber\n", i);
             }
+
+            //Unreachable code now that we got the infinite loop 
 
             //closing the pipes completely from child
             close(child_info[i].pipe[PARENT_W][TO_READ]);
@@ -232,15 +226,17 @@ int main(int argc, char *argv[]) {
             if (check) { //if child has responded with done
                 read(child_info[i].pipe[CHILD_W][TO_READ], readmessage, sizeof(readmessage)); //Child's "done"
 
-                sprintf(parentmessage, "3"); //writing for how many seconds to sleep
+                sprintf(parentmessage, "%d", i); //writing for how many seconds to sleep
                 write(child_info[i].pipe[PARENT_W][TO_WRITE], parentmessage, strlen(parentmessage)+1); //Name of the child, +1 to include null terminator \0 although is works fine without it
-                printf("Parent send message to child #%d\n", i);
+                printf("Parent send sleep message to child #%d\n", i);
             } else {
                 printf("Parent SKIPPED child #%d\n", i);
             }
         }
     }
 
+    //Unreachable code now that we got the infinite loop
+    
     printf("Parent no longer waits for messages!!\n");
 
     // waitpid(cpid[i], NULL, 0);
@@ -257,12 +253,9 @@ int main(int argc, char *argv[]) {
     }
     free(child_info);
 
-
-    // Close the file stream, if used. (This is used for debugging)
-    // fclose(new_stdout);
-
     printf("end of program\n");
 
+    exit(0);
 }
 
 
@@ -281,7 +274,7 @@ bool is_read_pipe_ready(int* read_pipe, int timelimit){
 
     if (ready_fds == -1) {
         perror("select");
-        exit(EXIT_FAILURE);
+        exitGracefully("Select failed", EXIT_FAILURE);
     }
 
     // Check if the pipe's read end is ready for reading
@@ -297,36 +290,17 @@ int** create_2d_INT_array(int index, int jndex) {
     int** array = (int**)malloc(index * sizeof(int*));
     if (array == NULL) {
         perror("Memory allocation failed");
-        exitGracefully("Memory allocation failed\n",1);
+        exitGracefully("Memory allocation failed\n", EXIT_FAILURE);
     }
     for (int i = 0; i < index; ++i) {
         array[i] = (int*)malloc(jndex * sizeof(int));
         if (array[i] == NULL) {
             perror("Memory allocation failed");
-            exitGracefully("Memory allocation failed\n",1);
+            exitGracefully("Memory allocation failed\n", EXIT_FAILURE);
         }
     }
-
     return array;
 }
-
-// char** create_2d_CHAR_array(int index, int jndex) {
-
-//     char** array = (char**)malloc(index * sizeof(char*));
-//     if (array == NULL) {
-//         perror("Memory allocation failed");
-//         exitGracefully("Memory allocation failed\n",1);
-//     }
-//     for (int i = 0; i < index; ++i) {
-//         array[i] = (char*)malloc(jndex * sizeof(char));
-//         if (array[i] == NULL) {
-//             perror("Memory allocation failed");
-//             exitGracefully("Memory allocation failed\n",1);
-//         }
-//     }
-
-//     return array;
-// }
 
 void free_2d_INT_array(int** array, int index) {
     for (int i = 0; i < index; ++i) {
@@ -334,14 +308,6 @@ void free_2d_INT_array(int** array, int index) {
     }
     free(array);
 }
-
-// void free_2d_CHAR_array(char** array, int index) {
-//     for (int i = 0; i < index; ++i) {
-//         free(array[i]);
-//     }
-//     free(array);
-// }
-
 
 void lockFile(int fileDescriptor) {
     struct flock fl;
@@ -352,7 +318,7 @@ void lockFile(int fileDescriptor) {
 
     if (fcntl(fileDescriptor, F_SETLKW, &fl) == -1) {
         perror("Error locking file");
-        exit(EXIT_FAILURE); //** should this be exit gracefully?
+        exitGracefully("Error locking file", EXIT_FAILURE);
     }
 }
 
@@ -365,7 +331,7 @@ void unlockFile(int fileDescriptor) {
 
     if (fcntl(fileDescriptor, F_SETLKW, &fl) == -1) {
         perror("Error unlocking file");
-        exit(EXIT_FAILURE); //** should this be exit gracefully?
+        exitGracefully("Error unlocking file", EXIT_FAILURE);
     }
 }
 
@@ -415,13 +381,13 @@ void free_resources_parent(){
 
 void on_sig_term_parent(int sig) {
     while ((wait(NULL)) > 0); //waiting for all children to finish their clean up
-    printf("Children cleaned up. Exiting\n");
+    printf("Children cleaned up. Exiting..\n");
     free_resources_parent();
     exit(0);
 }
 
 void on_sig_term_child(int sig) {
-    printf("Terminating due to SIGINT(Ctrl+C) signal\n");
+    printf("Child terminating due to SIGINT(Ctrl+C) signal\n");
     
     free_resources_child();
     exit(0);
@@ -430,25 +396,4 @@ void on_sig_term_child(int sig) {
 void exitGracefully(char *exit_message, int exnum){
     printf("%s", exit_message);
     exit(exnum);
-}
-
-
-//debugging
-bool stdout_to_file(FILE *new_stdout){
-    // Check if the file opening was successful
-    if (new_stdout == NULL) {
-        fprintf(stderr, "Failed to open the file for writing.\n");
-        return false; // Return an error code
-    }
-
-    // Redirect stdout to the new file stream
-    if (dup2(fileno(new_stdout), fileno(stdout)) == -1) {
-        fprintf(stderr, "Failed to redirect stdout.\n");
-        return false; // Return an error code
-    }
-}
-
-void restore_stdout(FILE *new_stdout) {
-    fflush(stdout);
-    freopen("/dev/tty", "w", stdout); // On Linux, use "/dev/tty" to reopen the console
 }

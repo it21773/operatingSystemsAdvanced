@@ -6,6 +6,8 @@
 #define MESSAGE_SIZE 50
 
 int main() {
+
+    printf("%d\n", EXIT_FAILURE);
     int parent_to_child_pipe[2];
     int child_to_parent_pipe[2];
 

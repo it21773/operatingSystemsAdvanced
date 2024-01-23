@@ -13,15 +13,7 @@
 #include <sys/time.h>
 
 // notes/ to-do:
-// remains: incorporate RPC,
-//      implement exec(this will also improve resource clean-up(with singals)),
-//      make code more readable
-// 
-// even with malloc i can't seem to create 1000 children
-// 
-// extra:
-// when using exitGracefully, replace exnum=1 with EXIT_FAILURE
-// should i use exitGracefully so sparingly?
+// this is outdated by project.c
 
 #define PARENT_W 0
 #define CHILD_W 1

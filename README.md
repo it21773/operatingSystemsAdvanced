@@ -1,1 +1,11 @@
-Only project.c is the actual project for this exercise. The rest are simply there as a reference to help me.
+Still working on some things...
+
+To run:
+``bash``
+gcc fakeServer.c project.c extra_functions.c
+``bash``
+
+Then:
+``bash``
+./a.out <file.txt> <number of children>
+``bash``

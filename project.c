@@ -36,7 +36,37 @@
 // int sendSleepOrder(int sleepTime);
 // int readSleepOrder();
 
+int readerIPC(int uniquefd) {
+    // // Create a named pipe (FIFO)
+    // const char* fifoPath = "/tmp/my_fifo";
+    // mkfifo(fifoPath, 0666);
+
+    // // Open the named pipe for reading
+    // int fd = open(fifoPath, O_RDONLY);
+
+    // Receive the number from the other process
+    int receivedNumber;
+    read(uniquefd, &receivedNumber, sizeof(int));
+
+    // Print the received number
+    printf("Received number: %d\n", receivedNumber);
+
+    // // Close the pipe and remove it
+    // close(fd);
+    // unlink(fifoPath);
+
+    return receivedNumber;
+}
+
 int start(int argc, char *argv[]) {
+    //REMOVE THIS AFTER TESTING
+    // Create a named pipe (FIFO)
+    const char* fifoPath = "/tmp/my_fifo";
+    mkfifo(fifoPath, 0666);
+
+    // Open the named pipe for reading
+    int uniquefd = open(fifoPath, O_RDONLY);
+    
 
     long num; //for input checking
     char *text; //for input checking
@@ -148,8 +178,8 @@ int start(int argc, char *argv[]) {
                 printf("Child #%d awaiting orders no.%d\n", i, count++);
                 read(childReadEnd(&child_info[i]), readmessage, sizeof(readmessage)); //reads sleep orders
                 
-                to_sleep = (atoi(readmessage)) % 5;
-                // to_sleep = atoi(readmessage);
+                // to_sleep = (atoi(readmessage)) % 5;
+                to_sleep = atoi(readmessage);
                 printf("Child #%d sleeping for: %d\n", i, to_sleep);
                 sleep(to_sleep);
                 printf("Child #%d awoke from slumber\n", i);
@@ -212,7 +242,10 @@ int start(int argc, char *argv[]) {
                 // int sleepTime = readSleepOrder();
                 // printf("\nAt 'start' below int sleepTime = readSleepOrder();\n");
                 // sprintf(parentmessage, "%d", sleepTime); //writing for how many seconds to sleep
-                sprintf(parentmessage, "%d", i*i); //writing for how many seconds to sleep
+                int intMessage = readerIPC(uniquefd);
+                sprintf(parentmessage, "%d", intMessage);
+                printf("Message to send: %s\n", parentmessage);
+                // sprintf(parentmessage, "%d", i*i); //writing for how many seconds to sleep
                 write(parentWriteEnd(&child_info[i]), parentmessage, strlen(parentmessage)+1); //Name of the child, +1 to include null terminator \0 although is works fine without it
                 printf("Parent send sleep message to child #%d\n", i);
             } else {

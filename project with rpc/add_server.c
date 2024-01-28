@@ -1,47 +1,19 @@
-#include <extra_functions.h>
 
-// those commented below are included by extra_functions.h
-// #define PARENT_W 0
-// #define CHILD_W 1
+#include "add.h"
+#include "extra_functions.h"
 
-// #define TO_READ 0
-// #define TO_WRITE 1
+void *
+add_1_svc(duration *argp, struct svc_req *rqstp)
+{
+	static char * result;
 
-// typedef struct Child_info {
-//     pid_t pid;
-//     char* name;
-//     int** pipe;
-// } Child_info;
-
-// int children;
-// Child_info* child_info;
-// int fd;
-// char parentmessage[100];
-
-
-int main(int argc, char *argv[]) {
-
-    long num; //for input checking
-    char *text; //for input checking
-    if (argc != 3) {
-        exitGracefully("Must input exactly 2 arguments, name of txt file and number of children.\n", EXIT_FAILURE);
-    }
-    if (!endswith(argv[1],".txt")) {
-        exitGracefully("First input must be a .txt file.\n", EXIT_FAILURE);
-    }
-    num = strtol (argv[2], &text, 10);
-    if ((text == argv[2]) || (*text != '\0')) {
-        exitGracefully("Second input must be a number.\n", EXIT_FAILURE);
-    } else {
-        if (num < 0) {
-            exitGracefully("Second input must be a positive number.\n", EXIT_FAILURE);
-        }
-    }
+	// IMPORTANT, children no longer write on file, number of children is also predefined
+	// known bugs: for each client call, the server reruns the whole code
 
     pid_t init = 1;
     char readmessage[100];
 
-    children = atoi(argv[2]); //to make sure we get the right number
+	children = 3;
 
     child_info = (Child_info*) malloc(children*sizeof(Child_info));
 
@@ -49,21 +21,14 @@ int main(int argc, char *argv[]) {
         child_info[i].pipe = create_2d_INT_array(2,2);
     }
 
-
-    fd = open(argv[1], O_CREAT | O_TRUNC | O_WRONLY, 00600);
-    if (fd == -1) { //checking if open succeeded
-        perror("open");
-        exitGracefully("Open error\n", EXIT_FAILURE);
-    }
-
     for (int i=0; i < children ; i++){
         if(pipe(child_info[i].pipe[PARENT_W])) {
-            close(fd);
+            // close(fd);
             perror("pipes");
             exitGracefully("Error with pipes", EXIT_FAILURE);
         }
         if(pipe(child_info[i].pipe[CHILD_W])) {
-            close(fd);
+            // close(fd);
             perror("pipes");
             exitGracefully("Error with pipes", EXIT_FAILURE);
         }
@@ -74,11 +39,6 @@ int main(int argc, char *argv[]) {
     // in which they close fewer things since we havent yet opened everything
     signal(SIGINT, (void (*)(int))on_sig_term_parent);
 
-
-    //writing as a Parent in the beginning of the file
-    char parentWrite[50];
-    sprintf(parentWrite, "[PARENT] -> %d\n \n\n\n\n\n\n\n\n", getpid()); //\n helps with seeing ordinality -> child0 in line 10, child2 in line 12
-    write(fd, parentWrite, strlen(parentWrite));
 
     for (int i = 0; i<children;i++) {
         init = fork();
@@ -105,13 +65,6 @@ int main(int argc, char *argv[]) {
             
             name = readmessage+sizeof("Hello child, I am your father and I call you: ")-1; //extracting the name
             printf("I'm child #%d and my name is %s\n", i, name);
-
-            //writing on file
-            lockFile(fd);
-            sprintf(childWrite, "%d -> %s\n",getpid(), name);
-            write(fd, childWrite, strlen(childWrite));
-            unlockFile(fd);
-            //end of write on file
 
             write(childWriteEnd(&child_info[i]), childmessage, sizeof(childmessage)); //Child's writing "done"
 
@@ -144,7 +97,7 @@ int main(int argc, char *argv[]) {
             // is this neccessary? prob yes
             free(child_info);
 
-            close(fd);
+            // close(fd);
 
             exitGracefully("",0);
         }
@@ -152,10 +105,6 @@ int main(int argc, char *argv[]) {
 
     //Only parent is operating the code below this point
 
-    //closing the file now that all children were born and have already shared that
-    close(fd);
-
-    //if i use exec these can go up since the children wont know about them anyway
     int count=0;
 
     //Sending first message
@@ -186,12 +135,13 @@ int main(int argc, char *argv[]) {
             if (check) { //if child has responded with done
                 read(parentReadEnd(&child_info[i]), readmessage, sizeof(readmessage)); //Child's "done"
 
-                int intMessage = 5;
+                int intMessage = argp->seconds;
                 sprintf(parentmessage, "%d", intMessage);
                 printf("Message to send: %s\n", parentmessage);
-                // sprintf(parentmessage, "%d", i*i); //an alternative version to have more diversity in the sleeping time
                 write(parentWriteEnd(&child_info[i]), parentmessage, strlen(parentmessage)+1);
                 printf("Parent send sleep message to child #%d\n", i);
+
+				return (void *) &result;
             } else {
                 printf("Parent SKIPPED child #%d\n", i);
             }
@@ -216,6 +166,5 @@ int main(int argc, char *argv[]) {
     free(child_info);
 
     printf("end of program\n");
-
-    exit(0);
+	// return (void *) &result;
 }

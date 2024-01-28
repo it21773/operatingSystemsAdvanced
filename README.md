@@ -1,1 +1,10 @@
-Only project.c is the actual project for this exercise. The rest are simply there as a reference to help me.
+feel free to ignore this file: extra things, usefull to me, useless to others
+
+project with rpc: my attempt to implement rpc
+
+The rest file are the project up untill the rpc implementation, fully operational
+To compile:
+$ gcc project.c extra_functions.c
+
+To run:
+$ /a.out <file.txt> <number of child processes>
